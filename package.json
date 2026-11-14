@@ -1,0 +1,12 @@
+{
+  "name": "obsidian-cli-lightweight",
+  "version": "0.1.0",
+  "description": "Local Obsidian tasks and Bases for AI agents",
+  "type": "module",
+  "bin": { "obsl": "bin/obsl.js" },
+  "files": ["bin", "src", "README.md", "docs/AGENT.md"],
+  "engines": { "node": "20 || >=22" },
+  "scripts": { "test": "node --test", "start": "node bin/obsl.js" },
+  "dependencies": { "mdbasequery": "0.0.3", "yaml": "^2.8.1" },
+  "overrides": { "minimatch": "^11.0.1" }
+}
