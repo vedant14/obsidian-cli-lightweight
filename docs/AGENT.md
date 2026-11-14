@@ -17,6 +17,8 @@ For a daily task, use `tasks create --daily --text TEXT --due YYYY-MM-DD --force
 
 Create a new note with `notes create PATH.md --template TEMPLATE.md [--text TEXT] [--date YYYY-MM-DD] [--dry-run]`. Parent folders are created as needed; existing notes are never overwritten. Templates expand `{{title}}`, `{{date}}`, `{{time}}`, and Moment format strings. Unknown placeholders and plugin scripts remain literal. Dry runs create no files or folders. Dates use the local timezone; `--date` changes the calendar day. Check results before retrying task creation to avoid duplicates.
 
+Append arbitrary text with `notes append --daily --text TEXT --force`, or `notes append PATH.md --text TEXT --revision REVISION` for a specific existing file. Multiline text is supported and no checkbox is added. Existing content is preserved; a separating newline is added only when needed. Daily targeting supports `--date` and `--template` and creates missing daily notes from their template. Use `--dry-run` to preview. Check results before retrying to avoid duplicate text.
+
 Example query commands:
 
 ```sh

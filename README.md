@@ -69,6 +69,18 @@ Unordered, ordered, nested, and blockquoted checkbox lines are recognized. YAML 
 
 ### Daily notes
 
+Append any text to a daily note with `notes append --daily`:
+
+```sh
+obsl notes append --daily --text 'Met with the team. Release is on track.' --force
+obsl notes append --daily --date 2026-11-20 --text $'## Notes\n\nA paragraph.\n- A bullet\n' --force
+obsl notes append --daily --text 'Plan for today' --template 'Templates/Daily.md' --force --dry-run
+```
+
+Text is appended literally, including multiple lines, without adding a checkbox. A separating newline is added only when the existing content lacks a final newline; supplied text is otherwise unchanged. Existing content and line endings are preserved. `notes append PATH.md --text TEXT` also works for a specific existing file. Appending requires `--revision HASH` from a read/query or explicit `--force`; `--dry-run` previews without writing. Check the result before retrying to avoid duplicate text.
+
+Daily-note targeting uses the settings described below for both `notes append --daily` and `tasks create --daily`. Missing daily notes are created from their template before appending; `--date` selects the note's day and `--template` overrides its creation template.
+
 Use `--daily` instead of a file path to append to today's daily note, or select a day with `--date`:
 
 ```sh

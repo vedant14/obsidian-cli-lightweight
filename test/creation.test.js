@@ -112,6 +112,51 @@ test('concurrent note creation publishes exactly one complete note', async t => 
   assert.deepEqual(await readdir(path.join(root, 'Concurrent')), ['Note.md']);
 });
 
+test('appends arbitrary multiline text to daily notes, using templates only for missing notes', async t => {
+  const { root, cli, settings } = await fixture(t);
+  await settings({ folder: 'Journal', template: 'Templates/Daily' });
+  const text = '## Observations\n\nFirst paragraph.\n- A regular bullet\n';
+  const args = ['notes', 'append', '--daily', '--date', '2026-11-20', '--text', text, '--force'];
+  const preview = await cli(...args, '--dry-run');
+  assert.equal(preview.path, 'Journal/2026-11-20.md');
+  assert.equal(preview.before, null);
+  assert.ok(preview.after.endsWith('## Tasks\r\n' + text));
+  assert.deepEqual((await readdir(root)).sort(), ['.obsidian', 'Templates']);
+  const created = await cli(...args);
+  assert.equal(created.revision, preview.revision);
+  const appended = await cli('notes', 'append', '--daily', '--date', '2026-11-20', '--text', 'A final thought.', '--template', 'Missing.md', '--revision', created.revision);
+  assert.equal(await readFile(path.join(root, created.path), 'utf8'), preview.after + 'A final thought.');
+  assert.equal(appended.changed, true);
+  assert.equal((await cli('tasks', 'list')).total, 0);
+  await assert.rejects(cli('notes', 'append', '--daily', '--date', '2026-11-20', '--text', 'Stale', '--revision', created.revision), { code: 'CONFLICT' });
+  await assert.rejects(cli('notes', 'append', '--daily', '--date', '2026-11-19', '--text', 'Missing', '--revision', created.revision), { code: 'CONFLICT' });
+});
+
+test('note append preserves content and supplied text, previews, and requires write preconditions', async t => {
+  const { root, cli } = await fixture(t);
+  for (const [name, content, expected] of [
+    ['Empty.md', '', 'First\nSecond'],
+    ['Plain.md', 'Existing', 'Existing\nFirst\nSecond'],
+    ['CRLF.md', '# Note\r\nExisting', '# Note\r\nExisting\r\nFirst\nSecond'],
+    ['Trailing.md', 'Existing\n', 'Existing\nFirst\nSecond'],
+  ]) {
+    await writeFile(path.join(root, name), content);
+    const note = await cli('notes', 'read', name);
+    const args = ['notes', 'append', name, '--text', 'First\nSecond', '--revision', note.revision];
+    assert.equal((await cli(...args, '--dry-run')).after, expected);
+    assert.equal(await readFile(path.join(root, name), 'utf8'), content);
+    await cli(...args);
+    assert.equal(await readFile(path.join(root, name), 'utf8'), expected);
+  }
+  await assert.rejects(cli('notes', 'append', 'Plain.md', '--text', 'No'), { code: 'REVISION_REQUIRED' });
+  await assert.rejects(cli('notes', 'append', 'Plain.md', '--text', '', '--force'), { code: 'INVALID_TEXT' });
+  await assert.rejects(cli('notes', 'append', 'Missing.md', '--text', 'No', '--force'), { code: 'ENOENT' });
+  await assert.rejects(cli('notes', 'append', '../outside.md', '--text', 'No', '--force'), { code: 'INVALID_PATH' });
+  const daily = await cli('notes', 'append', '--daily', '--text', 'Today', '--force');
+  assert.equal(daily.path, noteDate().format('YYYY-MM-DD') + '.md');
+  assert.equal(await readFile(path.join(root, daily.path), 'utf8'), 'Today');
+});
+
 test('new command argument combinations and dates are validated before opening a vault', async () => {
   for (const args of [
     ['tasks', 'create', '--daily', 'Note.md', '--text', 'No'],
@@ -120,6 +165,10 @@ test('new command argument combinations and dates are validated before opening a
     ['tasks', 'create', '--daily', '--date', '2026-02-30', '--text', 'No'],
     ['notes', 'create'], ['notes', 'create', 'New.md', '--date', 'tomorrow'],
     ['notes', 'create', 'New.md', '--force'],
+    ['notes', 'append', '--daily', 'Note.md', '--text', 'No'],
+    ['notes', 'append', 'Note.md'],
+    ['notes', 'append', 'Note.md', '--text', 'No', '--date', '2026-11-20'],
+    ['notes', 'append', '--daily', '--text', 'No', '--date', '2026-02-30'],
   ]) await assert.rejects(run(args, {}), { code: 'INVALID_ARGUMENT' });
   const schema = (await run(['schema'], {})).data;
   assert.ok(schema.commands['tasks create'].options.includes('daily'));

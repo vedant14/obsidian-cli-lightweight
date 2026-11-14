@@ -3,7 +3,7 @@ import { CliError, requireThat } from './errors.js';
 import { vaultRoot } from './vault.js';
 import { createTask, editTask, listTasks } from './tasks.js';
 import { listBases, queryNotes, showBase } from './bases.js';
-import { createNote, getNote, setProperty } from './notes.js';
+import { appendNote, createNote, getNote, setProperty } from './notes.js';
 
 const HELP = `obsl — local Obsidian tasks and Bases for agents
 
@@ -32,6 +32,10 @@ Usage: obsl [--vault PATH] COMMAND [OPTIONS]
     --sort PROPERTY:asc|desc    Repeatable sort keys
     --limit N --offset N
   notes read PATH.md           Read note content and revision
+  notes append [PATH.md]       Append arbitrary --text TEXT (multiline allowed)
+    --daily [--date YYYY-MM-DD] Target a daily note, creating it if missing
+    --template PATH.md         Override the template for a new daily note
+    --revision HASH | --force --dry-run
   notes create PATH.md         Create a note; never overwrite an existing file
     --template PATH.md         Use a template (title/date/time variables)
     --text TEXT --date YYYY-MM-DD --dry-run
@@ -57,6 +61,7 @@ const commandOptions = {
   'notes query': ['where', 'select', 'sort', 'limit', 'offset'],
   'notes read': [], 'notes set': ['value', 'revision', 'force', 'dry-run'],
   'notes create': ['template', 'text', 'date', 'dry-run'],
+  'notes append': ['text', 'daily', 'date', 'template', 'revision', 'force', 'dry-run'],
 };
 const globals = ['vault', 'format', 'help', 'version', 'envelope', 'diagnostics'];
 const booleans = new Set(['force', 'dry-run', 'daily', 'help', 'version', 'envelope', 'diagnostics']);
@@ -66,9 +71,9 @@ export const schema = {
   name: 'obsl', version: '0.1.0', schemaVersion: 1,
   commands: Object.fromEntries(Object.entries(commandOptions).map(([command, options]) => [command, { options }])),
   globalOptions: globals,
-  arguments: { 'tasks create': ['path'], 'tasks toggle': ['ref'], 'tasks set': ['ref'], 'tasks edit': ['ref'], 'bases show': ['path'], 'bases query': ['path'], 'notes read': ['path'], 'notes set': ['path', 'key'], 'notes create': ['path'] },
-  argumentAlternatives: { 'tasks create': [{ arguments: ['path'] }, { arguments: [], requiredOptions: ['daily'] }] },
-  requiredOptions: { 'tasks create': ['text'], 'tasks set': ['status'], 'tasks edit': ['text'], 'notes set': ['value'] },
+  arguments: { 'tasks create': ['path'], 'tasks toggle': ['ref'], 'tasks set': ['ref'], 'tasks edit': ['ref'], 'bases show': ['path'], 'bases query': ['path'], 'notes read': ['path'], 'notes set': ['path', 'key'], 'notes create': ['path'], 'notes append': ['path'] },
+  argumentAlternatives: Object.fromEntries(['tasks create', 'notes append'].map(command => [command, [{ arguments: ['path'] }, { arguments: [], requiredOptions: ['daily'] }]])),
+  requiredOptions: { 'tasks create': ['text'], 'notes append': ['text'], 'tasks set': ['status'], 'tasks edit': ['text'], 'notes set': ['value'] },
   optionTypes: { boolean: [...booleans], repeatableString: [...multiples], default: 'string' },
   success: 'command-specific result directly, without a wrapper',
   failure: { error: { code: 'CODE', message: 'description', details: 'optional' } },
@@ -78,6 +83,7 @@ export const schema = {
   taskRef: 'vault-relative/path.md:1-based-line',
   taskCreation: 'tasks create PATH appends an unchecked task to an existing Markdown file. Use --daily instead of PATH to target the local current day or --date YYYY-MM-DD. Reads .obsidian/daily-notes.json folder, format and template; defaults to YYYY-MM-DD.md at vault root. Missing daily notes are created from the configured template or --template override. --due adds a Tasks-style emoji date. Requires --revision or --force; supports --dry-run. Returns the task and file revision.',
   noteCreation: 'notes create PATH [--template PATH] [--text TEXT] [--date YYYY-MM-DD] [--dry-run] creates parent folders and a new Markdown note, refusing existing paths. Templates are vault-relative Markdown files; .md may be omitted. Expands {{title}}, {{date}}, {{time}} and Moment date/time formats. Date defaults to local today. Unknown placeholders and Templater scripts remain literal; no plugins execute.',
+  noteAppend: 'notes append PATH --text TEXT appends arbitrary nonempty text, including multiple lines, to an existing Markdown note. Use --daily instead of PATH for a daily note, with optional --date and --template; missing daily notes are created from their template. Adds a separating newline only when existing content lacks one; preserves supplied text literally. Requires --revision or --force; supports --dry-run. Returns path, changed, dryRun and revision; previews include before/after.',
   editing: 'Use a revision from the latest query. Re-query after every edit. --force skips the revision precondition. --dry-run previews.',
   jsonl: 'One bare task, row, or base per line for list/query commands; errors remain JSON on stderr. Empty results produce no lines.',
   compatibility: 'Bases queries use mdbasequery 0.0.3 over Markdown notes. Plugin Dataview queries and plugin task recurrences are not evaluated.',
@@ -117,9 +123,10 @@ export async function run(argv, env = process.env, parsed = parseArguments(argv)
   const allowed = [...globals, ...commandOptions[command]];
   for (const key of Object.keys(values)) requireThat(allowed.includes(key), 'INVALID_ARGUMENT', `--${key} is not valid for ${command}.`);
   const args = positionals.slice(2);
-  const count = command === 'tasks create' && values.daily ? 0 : schema.arguments[command]?.length ?? 0;
+  const dailyCommand = ['tasks create', 'notes append'].includes(command);
+  const count = dailyCommand && values.daily ? 0 : schema.arguments[command]?.length ?? 0;
   requireThat(args.length === count, 'INVALID_ARGUMENT', `${command} requires ${count} positional argument(s). See --help.`);
-  if (command === 'tasks create') requireThat(values.daily || (values.date === undefined && values.template === undefined), 'INVALID_ARGUMENT', '--date and --template on tasks create require --daily.');
+  if (dailyCommand) requireThat(values.daily || (values.date === undefined && values.template === undefined), 'INVALID_ARGUMENT', `--date and --template on ${command} require --daily.`);
   for (const name of schema.requiredOptions[command] ?? []) requireThat(values[name] !== undefined, 'INVALID_ARGUMENT', `${command} requires --${name}.`);
   requireThat(format !== 'jsonl' || ['tasks list', 'bases list', 'bases query', 'notes query'].includes(command), 'INVALID_ARGUMENT', 'jsonl is available only for list/query commands.');
   if (values.status && command === 'tasks list') requireThat(['open', 'done'].includes(values.status) || values.status.length === 1, 'INVALID_ARGUMENT', '--status must be open, done, or one checkbox character.');
@@ -141,6 +148,7 @@ export async function run(argv, env = process.env, parsed = parseArguments(argv)
     case 'notes query': data = await queryNotes(root, options); break;
     case 'notes read': data = await getNote(root, args[0]); break;
     case 'notes create': data = await createNote(root, args[0], options); break;
+    case 'notes append': data = await appendNote(root, args[0], options); break;
     case 'notes set': data = await setProperty(root, args[0], args[1], options); break;
   }
   if (!values.diagnostics && data.diagnostics && !data.diagnostics.warnings?.length && !data.diagnostics.errors?.length) {
