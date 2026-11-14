@@ -1,6 +1,6 @@
 # obsl
 
-A lightweight CLI for AI agents working with local Obsidian vaults. Query tasks and Bases, toggle checkboxes, edit task text, and update note properties. Runs against files on disk; Obsidian does not need to be open. No server, database, indexing daemon, or build step.
+A lightweight CLI for AI agents working with local Obsidian vaults. Create tasks with due dates, query tasks and Bases, toggle checkboxes, edit task text, and update note properties. Runs against files on disk; Obsidian does not need to be open. No server, database, indexing daemon, or build step.
 
 Requires Node.js 20 LTS or Node.js 22 or later.
 
@@ -30,6 +30,16 @@ obsl tasks list --status open --tag work
 Without an explicit vault or environment variable, the CLI searches the current directory and its parents for `.obsidian`. Explicit vault paths may point to any directory of Markdown notes.
 
 ## Tasks
+
+Append a task to a specific existing file (paths are relative to the vault):
+
+```sh
+obsl notes read 'Projects/Launch.md'
+obsl tasks create 'Projects/Launch.md' --text 'Review the release #work' \
+  --due 2026-11-20 --revision HASH_FROM_READ
+```
+
+This appends `- [ ] Review the release #work 📅 2026-11-20` and returns the created task, its reference, and the new file revision. `--due` is optional and must be a valid `YYYY-MM-DD` date. Use `--dry-run` to preview, or `--force` instead of `--revision` to append to the current file. Creation preserves existing content and line endings. Files must already exist; appending inside an unclosed code fence, frontmatter block, or HTML comment fails without writing. Repeating creation appends another task, so check the result before retrying.
 
 ```sh
 obsl tasks list

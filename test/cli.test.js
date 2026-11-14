@@ -37,6 +37,64 @@ test('task queries filter status, tag, due date, folder and pagination', async t
   assert.deepEqual((await cli('tasks', 'list', '--limit', '1', '--offset', '1')).tasks, all.tasks.slice(1, 2));
 });
 
+test('creates dated tasks in the selected file with revision checks and previews', async t => {
+  const { root, cli } = await fixture(t);
+  const before = await cli('notes', 'read', 'Projects/Alpha.md');
+  const args = ['tasks', 'create', 'Projects/Alpha.md', '--text', 'Review release #work', '--due', '2026-11-21', '--revision', before.revision];
+  const preview = await cli(...args, '--dry-run');
+  assert.equal(preview.after, before.content + '- [ ] Review release #work 📅 2026-11-21\n');
+  assert.equal(await readFile(path.join(root, 'Projects/Alpha.md'), 'utf8'), before.content);
+  const created = await cli(...args);
+  assert.deepEqual(created.task, preview.task);
+  assert.equal(created.task.due, '2026-11-21');
+  assert.equal(created.task.status, ' ');
+  assert.equal(created.task.revision, created.revision);
+  assert.deepEqual((await cli('tasks', 'list', '--due', '2026-11-21')).tasks, [created.task]);
+  assert.equal((await cli('tasks', 'list', '--file', 'Beta.md')).total, 1);
+  await assert.rejects(cli(...args), { code: 'CONFLICT' });
+  const { stdout } = await exec(process.execPath, [bin, '--vault', root, 'tasks', 'create', 'Beta.md', '--text', 'Another task', '--force']);
+  assert.equal(JSON.parse(stdout).task.text, 'Another task');
+});
+
+test('creation preserves line endings and handles empty files and missing final newline', async t => {
+  const { root, cli } = await fixture(t);
+  for (const [name, content, expected] of [
+    ['empty.md', '', '- [ ] New task\n'],
+    ['no-newline.md', '# Note', '# Note\n- [ ] New task\n'],
+    ['crlf.md', '# Note\r\nBody', '# Note\r\nBody\r\n- [ ] New task\r\n'],
+    ['trailing.md', '# Note\r\n', '# Note\r\n- [ ] New task\r\n'],
+  ]) {
+    await writeFile(path.join(root, name), content);
+    const created = await cli('tasks', 'create', name, '--text', 'New task', '--force');
+    assert.equal(await readFile(path.join(root, name), 'utf8'), expected);
+    assert.deepEqual((await cli('tasks', 'list', '--file', name)).tasks, [created.task]);
+  }
+});
+
+test('creation rejects invalid inputs, unsafe paths, and hidden append locations without writing', async t => {
+  const { root, cli } = await fixture(t);
+  const before = await readFile(path.join(root, 'Beta.md'), 'utf8');
+  await assert.rejects(cli('tasks', 'create', 'Beta.md', '--text', 'Task'), { code: 'REVISION_REQUIRED' });
+  for (const text of ['', '   ', 'one\ntwo']) {
+    await assert.rejects(cli('tasks', 'create', 'Beta.md', '--text', text, '--force'), { code: 'INVALID_TEXT' });
+  }
+  for (const due of ['', '2026-02-30', 'tomorrow']) {
+    await assert.rejects(cli('tasks', 'create', 'Beta.md', '--text', 'Task', '--due', due, '--force'), { code: 'INVALID_ARGUMENT' });
+  }
+  await assert.rejects(cli('tasks', 'create', 'Beta.md', '--text', 'Task 📅 2026-11-20', '--due', '2026-11-21', '--force'), { code: 'INVALID_TEXT' });
+  assert.equal(await readFile(path.join(root, 'Beta.md'), 'utf8'), before);
+  await symlink(path.join(root, 'Beta.md'), path.join(root, 'linked.md'));
+  for (const name of ['../outside.md', '.obsidian/hidden.md', 'linked.md', 'Projects.base']) {
+    await assert.rejects(cli('tasks', 'create', name, '--text', 'Task', '--force'), { code: 'INVALID_PATH' });
+  }
+  await assert.rejects(cli('tasks', 'create', 'Missing.md', '--text', 'Task', '--force'), { code: 'ENOENT' });
+  for (const content of ['---\ntitle: Unclosed\n', '```md\nexample\n', '<!-- hidden\n']) {
+    await writeFile(path.join(root, 'unclosed.md'), content);
+    await assert.rejects(cli('tasks', 'create', 'unclosed.md', '--text', 'Task', '--force'), { code: 'INVALID_TASK_LOCATION' });
+    assert.equal(await readFile(path.join(root, 'unclosed.md'), 'utf8'), content);
+  }
+});
+
 test('task parser skips YAML, fences and comments and handles quoted/ordered tasks', () => {
   const text = '---\nexample: |\n  - [ ] YAML\n---\n<!--\n- [ ] comment\n-->\n~~~md\n- [ ] fence\n~~~\n> - [ ] quoted\n1. [X] numbered\n\t- [-] cancelled\n';
   assert.deepEqual(parseTasks(text, 'a.md').map(t => [t.line, t.status]), [[11, ' '], [12, 'X'], [13, '-']]);

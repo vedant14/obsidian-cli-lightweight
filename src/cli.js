@@ -1,7 +1,7 @@
 import { parseArgs } from 'node:util';
 import { CliError, requireThat } from './errors.js';
 import { vaultRoot } from './vault.js';
-import { editTask, listTasks } from './tasks.js';
+import { createTask, editTask, listTasks } from './tasks.js';
 import { listBases, queryNotes, showBase } from './bases.js';
 import { getNote, setProperty } from './notes.js';
 
@@ -12,6 +12,7 @@ Usage: obsl [--vault PATH] COMMAND [OPTIONS]
   tasks list                   Query Markdown checkboxes
     --file PATH --folder PATH --status open|done|CHAR --search TEXT
     --tag TAG --due YYYY-MM-DD --before YYYY-MM-DD --limit N --offset N
+  tasks create PATH.md          Append --text TEXT; optionally --due YYYY-MM-DD
   tasks toggle PATH.md:LINE     Toggle between [ ] and [x]
   tasks set PATH.md:LINE        Set --status CHAR (use ' ' for unchecked)
   tasks edit PATH.md:LINE       Replace --text TEXT; optionally --status CHAR
@@ -42,6 +43,7 @@ JSON is the default. Errors are JSON on stderr with a nonzero exit status.
 `;
 
 const commandOptions = {
+  'tasks create': ['text', 'due', 'revision', 'force', 'dry-run'],
   'tasks list': ['file', 'folder', 'status', 'search', 'tag', 'due', 'before', 'limit', 'offset'],
   'tasks toggle': ['revision', 'force', 'dry-run'],
   'tasks set': ['status', 'revision', 'force', 'dry-run'],
@@ -58,8 +60,8 @@ export const schema = {
   name: 'obsl', version: '0.1.0', schemaVersion: 1,
   commands: Object.fromEntries(Object.entries(commandOptions).map(([command, options]) => [command, { options }])),
   globalOptions: globals,
-  arguments: { 'tasks toggle': ['ref'], 'tasks set': ['ref'], 'tasks edit': ['ref'], 'bases show': ['path'], 'bases query': ['path'], 'notes read': ['path'], 'notes set': ['path', 'key'] },
-  requiredOptions: { 'tasks set': ['status'], 'tasks edit': ['text'], 'notes set': ['value'] },
+  arguments: { 'tasks create': ['path'], 'tasks toggle': ['ref'], 'tasks set': ['ref'], 'tasks edit': ['ref'], 'bases show': ['path'], 'bases query': ['path'], 'notes read': ['path'], 'notes set': ['path', 'key'] },
+  requiredOptions: { 'tasks create': ['text'], 'tasks set': ['status'], 'tasks edit': ['text'], 'notes set': ['value'] },
   optionTypes: { boolean: [...booleans], repeatableString: [...multiples], default: 'string' },
   success: 'command-specific result directly, without a wrapper',
   failure: { error: { code: 'CODE', message: 'description', details: 'optional' } },
@@ -67,6 +69,7 @@ export const schema = {
   diagnostics: 'Nonempty query diagnostics are included automatically; --diagnostics includes empty diagnostics too.',
   exitCodes: { 0: 'success', 1: 'I/O or query failure', 2: 'invalid arguments', 3: 'edit conflict or lock' },
   taskRef: 'vault-relative/path.md:1-based-line',
+  taskCreation: 'tasks create appends an unchecked task to an existing Markdown file. --due adds a Tasks-style emoji date. Requires --revision or --force; supports --dry-run. Returns the created task and file revision.',
   editing: 'Use a revision from the latest query. Re-query after every edit. --force skips the revision precondition. --dry-run previews.',
   jsonl: 'One bare task, row, or base per line for list/query commands; errors remain JSON on stderr. Empty results produce no lines.',
   compatibility: 'Bases queries use mdbasequery 0.0.3 over Markdown notes. Plugin Dataview queries and plugin task recurrences are not evaluated.',
@@ -111,7 +114,7 @@ export async function run(argv, env = process.env, parsed = parseArguments(argv)
   for (const name of schema.requiredOptions[command] ?? []) requireThat(values[name] !== undefined, 'INVALID_ARGUMENT', `${command} requires --${name}.`);
   requireThat(format !== 'jsonl' || ['tasks list', 'bases list', 'bases query', 'notes query'].includes(command), 'INVALID_ARGUMENT', 'jsonl is available only for list/query commands.');
   if (values.status && command === 'tasks list') requireThat(['open', 'done'].includes(values.status) || values.status.length === 1, 'INVALID_ARGUMENT', '--status must be open, done, or one checkbox character.');
-  for (const name of ['due', 'before']) if (values[name]) {
+  for (const name of ['due', 'before']) if (values[name] !== undefined) {
     const date = new Date(values[name]);
     requireThat(/^\d{4}-\d{2}-\d{2}$/.test(values[name]) && !Number.isNaN(+date) && date.toISOString().slice(0, 10) === values[name], 'INVALID_ARGUMENT', `--${name} must be a valid YYYY-MM-DD date.`);
   }
@@ -119,6 +122,7 @@ export async function run(argv, env = process.env, parsed = parseArguments(argv)
   const root = await vaultRoot(values.vault ?? env.OBSIDIAN_VAULT);
   let data;
   switch (command) {
+    case 'tasks create': data = await createTask(root, args[0], options); break;
     case 'tasks list': data = await listTasks(root, options); break;
     case 'tasks toggle': data = await editTask(root, args[0], { ...options, toggle: true }); break;
     case 'tasks set': case 'tasks edit': data = await editTask(root, args[0], options); break;

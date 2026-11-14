@@ -69,6 +69,29 @@ export async function listTasks(root, options = {}) {
   return { tasks: tasks.slice(options.offset ?? 0, options.limit === undefined ? undefined : (options.offset ?? 0) + options.limit), total };
 }
 
+export async function createTask(root, relative, options) {
+  requireThat(relative.endsWith('.md'), 'INVALID_PATH', 'Tasks must be in Markdown files.');
+  requireThat(options.revision || options.force, 'REVISION_REQUIRED', 'Pass --revision from notes read or a query, or --force to append to the current file.');
+  requireThat(typeof options.text === 'string' && options.text.trim().length > 0 && !/[\r\n]/.test(options.text), 'INVALID_TEXT', 'Task text must be a nonempty single line.');
+  if (options.due !== undefined) {
+    const date = new Date(options.due);
+    requireThat(/^\d{4}-\d{2}-\d{2}$/.test(options.due) && !Number.isNaN(+date) && date.toISOString().slice(0, 10) === options.due, 'INVALID_ARGUMENT', '--due must be a valid YYYY-MM-DD date.');
+    requireThat(!options.text.includes('📅'), 'INVALID_TEXT', 'Use either --due or a due marker in --text, not both.');
+  }
+  let task;
+  const result = await updateFile(root, relative, options.revision, content => {
+    const newline = content.includes('\r\n') ? '\r\n' : '\n';
+    const prefix = content + (content && !content.endsWith('\n') ? newline : '');
+    const line = prefix.split('\n').length;
+    const text = options.text + (options.due !== undefined ? ` 📅 ${options.due}` : '');
+    const after = prefix + `- [ ] ${text}${newline}`;
+    task = parseTasks(after, relative).find(t => t.line === line);
+    requireThat(task, 'INVALID_TASK_LOCATION', 'Cannot append a visible task: the file ends inside frontmatter, a code fence, or an HTML comment.');
+    return after;
+  }, options.dryRun);
+  return { ...result, task };
+}
+
 export async function editTask(root, ref, options) {
   const parsed = ref.match(/^(.*):(\d+)$/);
   requireThat(parsed && Number(parsed[2]) > 0, 'INVALID_REF', 'Task reference must be PATH.md:LINE (line numbers start at 1).');

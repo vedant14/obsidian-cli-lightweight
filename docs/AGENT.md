@@ -11,6 +11,8 @@ Use `obsl` to inspect and edit the user's local Obsidian vault.
 7. Use `--dry-run` to inspect changes when helpful. On `CONFLICT`, query again and reassess; do not automatically substitute `--force`. On `LOCKED`, wait for the competing edit to finish.
 8. Use `notes read PATH` or a query row's revision before `notes set PATH KEY --value JSON --revision REVISION`. JSON string values need double quotes inside the shell argument, for example `'"active"'`.
 
+Create a task in a specific existing Markdown file with `obsl tasks create PATH.md --text TEXT --due YYYY-MM-DD --revision REVISION`. Get the file revision with `notes read PATH.md` or a query first. The due date is optional; the task is appended as an unchecked checkbox with a Tasks-style `📅` date. Creation supports `--dry-run` and explicit `--force`. It returns the created task and new revision. Check before retrying: repeating creation adds a duplicate.
+
 Example query commands:
 
 ```sh
