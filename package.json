@@ -7,6 +7,6 @@
   "files": ["bin", "src", "README.md", "docs/AGENT.md"],
   "engines": { "node": "20 || >=22" },
   "scripts": { "test": "node --test", "start": "node bin/obsl.js" },
-  "dependencies": { "mdbasequery": "0.0.3", "yaml": "^2.8.1" },
+  "dependencies": { "mdbasequery": "0.0.3", "moment": "^2.30.1", "yaml": "^2.8.1" },
   "overrides": { "minimatch": "^11.0.1" }
 }

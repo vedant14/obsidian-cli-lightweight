@@ -67,6 +67,20 @@ obsl tasks edit 'Projects/Launch.md:12' --text 'Review the release #work' \
 
 Unordered, ordered, nested, and blockquoted checkbox lines are recognized. YAML frontmatter, fenced code blocks, HTML comments, hidden directories and files, `node_modules`, and symlinks are excluded. This is a line-oriented task scanner rather than a full CommonMark parser; unusual Markdown constructs may differ from Obsidian rendering. Only single-line task text is replaced. Task descriptions on following lines remain untouched.
 
+### Daily notes
+
+Use `--daily` instead of a file path to append to today's daily note, or select a day with `--date`:
+
+```sh
+obsl tasks create --daily --text 'Review the release #work' --due 2026-11-20 --force
+obsl tasks create --daily --date 2026-11-20 --text 'Prepare release notes' --force
+obsl tasks create --daily --text 'Plan the day' --template 'Templates/Daily.md' --force --dry-run
+```
+
+The CLI reads `folder`, `format`, and `template` from `.obsidian/daily-notes.json`, following the core [Daily notes](https://help.obsidian.md/plugins/daily-notes) conventions. Defaults are the local current date, `YYYY-MM-DD.md`, and the vault root. Moment date formats, including subfolders such as `YYYY/MMMM/YYYY-MMM-DD`, are supported. `--date` selects the note's day independently of the task's `--due` date.
+
+A missing daily note is created from its configured template (or the `--template` override), with the task included in the same write. Existing daily notes receive only the appended task. Use `--revision` for an existing note, or `--force` to target current content or create a missing note. A supplied revision cannot match a missing note. `--date` and `--template` on task creation require `--daily`.
+
 ## Bases and note queries
 
 Saved filters can compare link properties using quoted wiki links, including `categories == ["[[Projects]]"]`. Equality operands interpret those wiki links as link values. Property IDs such as `formula.project list` and `sprint-status` retain their literal names in query results. The compatibility layer also resolves `file.fullname` and supports `asFile()` on backlink paths returned by the engine.
@@ -89,6 +103,19 @@ Each query row has `path`, `revision`, and `values` containing the selected colu
 Bases evaluation uses [mdbasequery](https://github.com/intellectronica/mdbasequery) 0.0.3. Compatibility follows that engine, including its expression functions, formulas, sorts, groups, summaries, and Markdown-only index. The CLI adds null-safe `contains`, `containsAny`, and `containsAll` calls in filters, formulas, and summary expressions: a missing or null receiver returns false rather than aborting a vault query. String and list receivers keep their normal behavior, and unrelated expression errors still fail the query. It is not a complete replica of Obsidian. Embedded Base blocks, attachment rows, Dataview queries, UI layouts, and task-plugin recurrence/completion-date automation are outside this CLI's scope. The saved query's `.base` path supplies the engine's `this` context. See the [official Bases syntax](https://help.obsidian.md/bases/syntax) for the source format.
 
 `bases list` includes every discovered `.base` file. Empty, malformed, or engine-unsupported definitions have `views: []` and an `error` with the file path; they do not stop discovery of other Bases. `bases show` and `bases query` fail with `BASE_PARSE_ERROR` and the path when that definition cannot be parsed.
+
+## Create notes from templates
+
+```sh
+obsl notes create 'Projects/New Launch.md' --template 'Templates/Project.md' --dry-run
+obsl notes create 'Projects/New Launch.md' --template 'Templates/Project.md'
+obsl notes create 'Meetings/Release.md' --template 'Templates/Meeting.md' \
+  --date 2026-11-20 --text 'Discuss the release checklist.'
+```
+
+`notes create` creates missing parent folders and refuses to overwrite existing paths. It returns `path`, `created`, `changed`, `dryRun`, `revision`, and `content`; previews also include `before: null` and `after`. Dry runs create no files or folders. Destination and template paths are vault-relative Markdown paths; the template's `.md` extension may be omitted. Omit `--template` to create an empty note, or supply `--text` for content. With a template, `--text` appends to its rendered content with a separating newline when needed.
+
+Templates support the core [Templates](https://help.obsidian.md/plugins/templates) variables `{{title}}`, `{{date}}`, `{{time}}`, and Moment format strings such as `{{date:YYYY-MM-DD}}` or `{{time:HH:mm}}`. The title is the filename without `.md`. `--date` overrides the local calendar day while retaining the current local time. Default date/time formats come from `.obsidian/templates.json` (`dateFormat`, `timeFormat`), falling back to `YYYY-MM-DD` and `HH:mm`. Unknown placeholders and Templater scripts remain literal; plugin scripts are not executed. Template text, frontmatter, and line endings are otherwise preserved.
 
 ## Read and edit note properties
 
@@ -130,6 +157,8 @@ Add `--envelope` to wrap successful JSON output as `{"schemaVersion":1,"ok":true
 | 3 | Edit conflict or file locked by another CLI process |
 
 Writes use an exclusive adjacent lock, a temporary file, and an atomic rename. File contents are checked again before replacement; task edits preserve original line endings and surrounding content. Other editors do not honor the CLI lock, so a small race remains between the last check and rename. A crashed process may leave a `PATH.obsl-lock`; remove it only after confirming no CLI process is editing that file. Atomic replacement preserves mode bits, but does not promise preservation of extended attributes, ACLs, or file identity. Ordinary read/write filesystem permissions are required, including write access to the containing directory.
+
+New notes are published from a fully written temporary file using an exclusive hard link, so concurrent creation cannot overwrite an existing note. New notes have private file permissions (`0600`); edits preserve existing permissions. Failed creation may leave newly created parent folders. The same vault path and symlink restrictions apply to note creation and template reads. Only the fixed core-plugin settings files above are read from `.obsidian`.
 
 ## Development
 

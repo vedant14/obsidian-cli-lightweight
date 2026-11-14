@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
-import { access, lstat, open, readFile, readdir, realpath, rename, unlink } from 'node:fs/promises';
+import { access, link, lstat, mkdir, open, readFile, readdir, realpath, rename, unlink } from 'node:fs/promises';
 import { CliError, requireThat } from './errors.js';
 
 export const digest = text => createHash('sha256').update(text).digest('hex');
@@ -25,7 +25,7 @@ export async function vaultRoot(explicit, cwd = process.cwd()) {
 }
 
 // Do not follow symlinks, including symlinked parent directories.
-export async function vaultPath(root, relative) {
+export async function vaultPath(root, relative, { allowMissing = false } = {}) {
   requireThat(typeof relative === 'string' && relative.length > 0 && !path.isAbsolute(relative), 'INVALID_PATH', 'Use a vault-relative path.');
   const target = path.resolve(root, relative);
   requireThat(inside(root, target) && target !== root, 'INVALID_PATH', 'Path must stay inside the vault.');
@@ -33,9 +33,47 @@ export async function vaultPath(root, relative) {
   for (const segment of path.relative(root, target).split(path.sep)) {
     requireThat(!segment.startsWith('.'), 'INVALID_PATH', 'Hidden vault paths are excluded.');
     current = path.join(current, segment);
-    requireThat(!(await lstat(current)).isSymbolicLink(), 'INVALID_PATH', 'Symlink paths are excluded.');
+    try { requireThat(!(await lstat(current)).isSymbolicLink(), 'INVALID_PATH', 'Symlink paths are excluded.'); }
+    catch (error) { if (!(allowMissing && error.code === 'ENOENT')) throw error; }
   }
   return target;
+}
+
+// Publish fully written content without replacing a note another writer created.
+export async function createFile(root, relative, content, dryRun = false) {
+  const target = await vaultPath(root, relative, { allowMissing: true });
+  try {
+    await lstat(target);
+    throw new CliError('CONFLICT', `Note already exists: ${relative}.`);
+  } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  if (!dryRun) {
+    let current = root;
+    for (const segment of path.relative(root, path.dirname(target)).split(path.sep).filter(Boolean)) {
+      current = path.join(current, segment);
+      try { await mkdir(current); }
+      catch (error) { if (error.code !== 'EEXIST') throw error; }
+      const info = await lstat(current);
+      requireThat(info.isDirectory() && !info.isSymbolicLink(), 'INVALID_PATH', 'Parent paths must be directories without symlinks.');
+    }
+    await vaultPath(root, relative, { allowMissing: true });
+    const temporary = path.join(path.dirname(target), `.obsl-${randomUUID()}.tmp`);
+    const handle = await open(temporary, 'wx', 0o600);
+    try {
+      await handle.writeFile(content, 'utf8');
+      await handle.sync();
+      await handle.close();
+      await vaultPath(root, relative, { allowMissing: true });
+      try { await link(temporary, target); }
+      catch (error) {
+        if (error.code === 'EEXIST') throw new CliError('CONFLICT', `Note already exists: ${relative}.`);
+        throw error;
+      }
+    } finally {
+      await handle.close().catch(() => {});
+      await unlink(temporary);
+    }
+  }
+  return { path: relative, created: true, changed: true, dryRun, revision: digest(content), ...(dryRun ? { before: null, after: content } : {}) };
 }
 
 export async function files(root) {

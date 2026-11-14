@@ -1,6 +1,18 @@
 import { isMap, parseDocument } from 'yaml';
-import { digest, readNote, updateFile } from './vault.js';
+import { createFile, digest, readNote, updateFile } from './vault.js';
 import { requireThat } from './errors.js';
+import { noteDate, renderTemplate } from './templates.js';
+
+export async function createNote(root, relative, options) {
+  requireThat(relative.endsWith('.md'), 'INVALID_PATH', 'Notes must be Markdown files.');
+  const date = noteDate(options.date);
+  let content = await renderTemplate(root, options.template, relative, date);
+  if (options.text !== undefined) {
+    const newline = content.includes('\r\n') ? '\r\n' : '\n';
+    content += (content && !content.endsWith('\n') ? newline : '') + options.text;
+  }
+  return { ...await createFile(root, relative, content, options.dryRun), content };
+}
 
 export async function getNote(root, relative) {
   const { content } = await readNote(root, relative);

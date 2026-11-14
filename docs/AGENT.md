@@ -13,6 +13,10 @@ Use `obsl` to inspect and edit the user's local Obsidian vault.
 
 Create a task in a specific existing Markdown file with `obsl tasks create PATH.md --text TEXT --due YYYY-MM-DD --revision REVISION`. Get the file revision with `notes read PATH.md` or a query first. The due date is optional; the task is appended as an unchecked checkbox with a Tasks-style `📅` date. Creation supports `--dry-run` and explicit `--force`. It returns the created task and new revision. Check before retrying: repeating creation adds a duplicate.
 
+For a daily task, use `tasks create --daily --text TEXT --due YYYY-MM-DD --force` instead of a file path. `--date YYYY-MM-DD` selects the note's day separately from the due date. The CLI reads core Daily notes folder/format/template settings from `.obsidian/daily-notes.json`; defaults are today's local date and `YYYY-MM-DD.md` at the vault root. Missing daily notes are created from their template, with `--template PATH` available as an override. Existing daily notes support `--revision` and only receive the appended task.
+
+Create a new note with `notes create PATH.md --template TEMPLATE.md [--text TEXT] [--date YYYY-MM-DD] [--dry-run]`. Parent folders are created as needed; existing notes are never overwritten. Templates expand `{{title}}`, `{{date}}`, `{{time}}`, and Moment format strings. Unknown placeholders and plugin scripts remain literal. Dry runs create no files or folders. Dates use the local timezone; `--date` changes the calendar day. Check results before retrying task creation to avoid duplicates.
+
 Example query commands:
 
 ```sh

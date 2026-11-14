@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
-import { digest, files, readNote, updateFile } from './vault.js';
+import { createFile, digest, files, readNote, updateFile } from './vault.js';
 import { requireThat } from './errors.js';
+import { dailyTarget, renderTemplate } from './templates.js';
 
 const TASK = /^(\s*(?:>\s*)*(?:[-+*]|\d+[.)])\s+\[)([^\]\r\n])(\][ \t]+)(.*)$/;
 const TAG = /(?:^|\s)#([\p{L}\p{N}_/-]+)/gu;
@@ -70,6 +71,11 @@ export async function listTasks(root, options = {}) {
 }
 
 export async function createTask(root, relative, options) {
+  let daily;
+  if (options.daily) {
+    daily = await dailyTarget(root, options);
+    relative = daily.path;
+  }
   requireThat(relative.endsWith('.md'), 'INVALID_PATH', 'Tasks must be in Markdown files.');
   requireThat(options.revision || options.force, 'REVISION_REQUIRED', 'Pass --revision from notes read or a query, or --force to append to the current file.');
   requireThat(typeof options.text === 'string' && options.text.trim().length > 0 && !/[\r\n]/.test(options.text), 'INVALID_TEXT', 'Task text must be a nonempty single line.');
@@ -79,7 +85,7 @@ export async function createTask(root, relative, options) {
     requireThat(!options.text.includes('📅'), 'INVALID_TEXT', 'Use either --due or a due marker in --text, not both.');
   }
   let task;
-  const result = await updateFile(root, relative, options.revision, content => {
+  const append = content => {
     const newline = content.includes('\r\n') ? '\r\n' : '\n';
     const prefix = content + (content && !content.endsWith('\n') ? newline : '');
     const line = prefix.split('\n').length;
@@ -88,7 +94,19 @@ export async function createTask(root, relative, options) {
     task = parseTasks(after, relative).find(t => t.line === line);
     requireThat(task, 'INVALID_TASK_LOCATION', 'Cannot append a visible task: the file ends inside frontmatter, a code fence, or an HTML comment.');
     return after;
-  }, options.dryRun);
+  };
+  let result;
+  if (daily) {
+    let missing = false;
+    try { await readNote(root, relative); }
+    catch (error) { if (error.code === 'ENOENT') missing = true; else throw error; }
+    if (missing) {
+      requireThat(!options.revision, 'CONFLICT', 'Daily note does not exist; the supplied revision cannot match.');
+      const content = await renderTemplate(root, daily.template, relative, daily.date);
+      result = await createFile(root, relative, append(content), options.dryRun);
+    }
+  }
+  result ??= await updateFile(root, relative, options.revision, append, options.dryRun);
   return { ...result, task };
 }
 
